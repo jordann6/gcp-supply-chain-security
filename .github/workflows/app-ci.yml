@@ -60,8 +60,11 @@ jobs:
       - name: Build image
         run: docker build -t scan-target:ci -f app/Dockerfile app
 
+      # Pinned with the v prefix. Upstream publishes only v-prefixed tags, so a
+      # bare 0.28.0 fails at "Set up job" before any step runs, and the failure
+      # reads like a broken scan rather than a tag that does not exist.
       - name: Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: scan-target:ci
           severity: CRITICAL,HIGH

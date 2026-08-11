@@ -181,16 +181,22 @@ cmd_clean() {
   load_env
   rule "Removing demo leftovers"
 
+  # Written as if/then rather than A && B || C. In the && || form, C also runs
+  # when A succeeds and B fails, so a failed note would be reported as a failed
+  # delete. Cleanup is expected to find nothing on a second run, which is why
+  # every branch here is silent about absence.
   for svc in "${APP_NAME}" "${APP_NAME}-unattested"; do
-    gcloud run services delete "${svc}" \
-      --project="${RUNTIME_PROJECT}" --region="${REGION}" --quiet >/dev/null 2>&1 &&
-      note "deleted service ${svc}" || true
+    if gcloud run services delete "${svc}" \
+      --project="${RUNTIME_PROJECT}" --region="${REGION}" --quiet >/dev/null 2>&1; then
+      note "deleted service ${svc}"
+    fi
   done
 
   for vm in scs-demo-stock scs-demo-hardened; do
-    gcloud compute instances delete "${vm}" \
-      --project="${RUNTIME_PROJECT}" --zone="${ZONE}" --quiet >/dev/null 2>&1 &&
-      note "deleted instance ${vm}" || true
+    if gcloud compute instances delete "${vm}" \
+      --project="${RUNTIME_PROJECT}" --zone="${ZONE}" --quiet >/dev/null 2>&1; then
+      note "deleted instance ${vm}"
+    fi
   done
 
   note "Done. Terraform destroy is a separate step, see scripts/destroy.sh."
