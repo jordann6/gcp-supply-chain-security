@@ -1,0 +1,27 @@
+# Everything this build creates has to land in the US.
+#
+# Enforced here at plan time as well as by gcp.resourceLocations in the landing
+# zone, and the duplication is deliberate. The org policy stops the resource
+# from existing; this stops the pull request. Catching it at the org means
+# finding out during apply, with half the plan already applied.
+apiVersion: constraints.gatekeeper.sh/v1alpha1
+kind: GCPResourceLocationsConstraintV1
+metadata:
+  name: allowed-locations
+  annotations:
+    description: Resources may only be created in US locations.
+spec:
+  severity: high
+  match:
+    ancestries:
+      - "**"
+  parameters:
+    locations:
+      - us-central1
+      - us-central1-a
+      - us-central1-b
+      - us-central1-c
+      - us-central1-f
+      - us
+      - global
+    exemptions: []

@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in. The real file is gitignored.
+
+org_id          = "000000000000"
+billing_account = "0X0X0X-0X0X0X-0X0X0X"
+
+# From the bootstrap layer's tfvars_snippet output.
+seed_project_id = "jn-scs-seed-a1b2c3"
+
+# Optional. Point at gcp-landing-zone's workloads folder to inherit its org
+# policy instead of running these projects at the org root.
+folder_id = ""
+
+region = "us-central1"
+zone   = "us-central1-a"
+
+# Leave false on the first apply. Run one build, then set true and re-apply to
+# add Google's provenance attestor to the policy.
+require_cloud_build_attestation = false
+
+# Only if the person running the demo does not already inherit compute.imageUser.
+# image_user_principals = ["user:you@example.com"]

@@ -1,0 +1,92 @@
+# Card 03: the plan-level gate.
+#
+# platform-guardrails ships two callable workflows. tf-ci.yml is static and
+# credential-free, and it runs on every PR from guardrails.yml. tf-plan.yml is
+# the credentialed half, but its OIDC step is AWS-shaped, so the GCP plan gate
+# lives here in the repo rather than being forced into a shared workflow that
+# would then carry two clouds' auth paths.
+#
+# gcloud beta terraform vet evaluates the plan, not the HCL. That distinction is
+# the reason this job exists at all: conftest and Checkov read the source and
+# cannot see inside a module or resolve a computed value, so a policy expressed
+# against HCL is blind to exactly the resources a module-based repo creates.
+#
+# The job is inert until GCP_WIF_PROVIDER is set as a repository variable, which
+# keeps forks and a torn-down environment from failing red for no reason.
+
+name: Terraform Vet
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-vet.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  vet:
+    name: Policy vet against the plan
+    runs-on: ubuntu-latest
+    if: vars.GCP_WIF_PROVIDER != ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Federated, not a key. The whole repo argues that unattested artifacts
+      # should not deploy, and a JSON service account key checked into a secret
+      # would be the same class of mistake one layer down.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PLAN_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: beta
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.3
+          terraform_wrapper: false
+
+      - name: Fetch the policy library
+        run: |
+          git clone --depth 1 \
+            https://github.com/GoogleCloudPlatform/policy-library.git \
+            "${RUNNER_TEMP}/policy-library"
+          # The library ships samples, not an opinion. Only the constraints this
+          # repo has actually chosen get copied into the active policies
+          # directory, so a library update cannot silently add a gate.
+          mkdir -p "${RUNNER_TEMP}/policy-library/policies/constraints"
+          cp policy-library/constraints/*.yaml "${RUNNER_TEMP}/policy-library/policies/constraints/"
+
+      - name: Plan
+        working-directory: terraform
+        env:
+          TF_VAR_org_id: ${{ vars.GCP_ORG_ID }}
+          TF_VAR_billing_account: ${{ vars.GCP_BILLING_ACCOUNT }}
+          TF_VAR_seed_project_id: ${{ vars.GCP_SEED_PROJECT }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.GCP_STATE_BUCKET }}" \
+            -backend-config="prefix=supply-chain-security/dev"
+          terraform plan -lock=false -out=tfplan
+          terraform show -json tfplan > tfplan.json
+
+      - name: Vet the plan
+        working-directory: terraform
+        run: |
+          gcloud beta terraform vet tfplan.json \
+            --policy-library="${RUNNER_TEMP}/policy-library" \
+            --format=json > violations.json
+          count=$(jq 'length' violations.json)
+          echo "==> ${count} violation(s)"
+          if [ "${count}" -gt 0 ]; then
+            jq -r '.[] | "  \(.severity // "HIGH")  \(.constraint)  \(.message)"' violations.json
+            exit 1
+          fi

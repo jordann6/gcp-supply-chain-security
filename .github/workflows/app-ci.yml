@@ -1,0 +1,69 @@
+name: App CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go build and vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: app/go.mod
+
+      - name: Format check
+        working-directory: app
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "gofmt would change:"
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - name: Vet
+        working-directory: app
+        run: go vet ./...
+
+      - name: Build
+        working-directory: app
+        run: go build -o /dev/null .
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck scripts/*.sh packer/scripts/*.sh
+
+  image:
+    name: Container image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the same Dockerfile the pipeline builds and scans the result, so
+      # a base image that has started carrying a CRITICAL is found on the pull
+      # request rather than by the Cloud Build gate failing after a merge.
+      - name: Build image
+        run: docker build -t scan-target:ci -f app/Dockerfile app
+
+      - name: Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: scan-target:ci
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true

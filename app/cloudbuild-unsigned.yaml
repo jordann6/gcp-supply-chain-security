@@ -1,0 +1,49 @@
+# The adversary's build.
+#
+# Identical to cloudbuild.yaml up to the push, then it stops. No scan, no
+# signature. This is what "someone pushed an image to the registry" looks like,
+# and it is the input to the first half of the demo.
+#
+# Worth being precise about what this proves. The image is in the same trusted
+# registry, built by the same Cloud Build, in the same project, under a
+# plausible tag. Every registry-name or repository-path check would let it
+# through. Only a signature over the digest catches it.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=${_REPO}/${_APP}:${_TAG}
+      - --file=app/Dockerfile
+      - app
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, "${_REPO}/${_APP}:${_TAG}"]
+
+  - id: report
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        DIGEST=$$(gcloud artifacts docker images describe \
+          "${_REPO}/${_APP}:${_TAG}" \
+          --format='value(image_summary.digest)')
+        echo "==> Pushed unattested: ${_REPO}/${_APP}@$$DIGEST"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+serviceAccount: projects/${PROJECT_ID}/serviceAccounts/${_BUILDER_SA}
+
+substitutions:
+  _REPO: ""
+  _APP: attested-app
+  _TAG: unattested
+  _BUILDER_SA: ""
+
+timeout: 900s

@@ -1,0 +1,119 @@
+# Card 04: build, scan, sign, deploy.
+#
+# Submitted from the repository root so /workspace holds both app/ and scripts/:
+#   gcloud builds submit --config app/cloudbuild.yaml --substitutions=...
+#
+# There is no GitHub trigger wired up, and that is deliberate. A trigger needs a
+# console OAuth handshake that cannot be expressed in Terraform, which would put
+# a manual click in the middle of a repo whose whole claim is that the path from
+# source to production is mechanical.
+#
+# Note the doubled dollar signs below. Cloud Build resolves ${_LIKE_THIS} in the
+# YAML before the shell ever runs, so anything meant for the shell has to be
+# written $$LIKE_THIS or it gets substituted away, usually into an empty string.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=${_REPO}/${_APP}:${_TAG}
+      - --file=app/Dockerfile
+      - app
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, "${_REPO}/${_APP}:${_TAG}"]
+
+  # Everything after this point works on the digest, never the tag. The tag was
+  # only ever a way to get the bytes into the registry.
+  - id: resolve-digest
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        DIGEST=$$(gcloud artifacts docker images describe \
+          "${_REPO}/${_APP}:${_TAG}" \
+          --format='value(image_summary.digest)')
+        printf '%s' "${_REPO}/${_APP}@$$DIGEST" > /workspace/image.txt
+        echo "==> $$(cat /workspace/image.txt)"
+
+  - id: scan
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        bash scripts/scan-gate.sh "$$(cat /workspace/image.txt)" "${_SEVERITIES}" "${_SCAN_LOCATION}"
+
+  # Only reached if the scan step exited zero, because Cloud Build stops the
+  # build on the first failing step. The gate is the step ordering, not a
+  # conditional inside this step.
+  - id: attest
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        bash scripts/attest.sh \
+          "$$(cat /workspace/image.txt)" \
+          "${_ATTESTOR}" \
+          "${_ATTESTOR_PROJECT}" \
+          "${_KMS_KEY_VERSION}"
+
+  - id: deploy
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run deploy "${_APP}" \
+          --project="${_RUNTIME_PROJECT}" \
+          --region="${_REGION}" \
+          --image="$$(cat /workspace/image.txt)" \
+          --service-account="${_RUNTIME_SA}" \
+          --binary-authorization=default \
+          --no-allow-unauthenticated \
+          --port=8080 \
+          --cpu=1 \
+          --memory=256Mi \
+          --min-instances=0 \
+          --max-instances=2 \
+          --quiet
+
+options:
+  # Provenance. Cloud Build records how the image was produced and, once this
+  # has run at least once, Google creates the built-by-cloud-build attestor in
+  # this project. Requiring that attestor as well is a second apply, see
+  # require_cloud_build_attestation in the Terraform.
+  requestedVerifyOption: VERIFIED
+
+  # A build running as a user-managed service account cannot write to the legacy
+  # per-build GCS log bucket. Without this the build fails before step one with
+  # an error about logs that reads like a storage misconfiguration.
+  logging: CLOUD_LOGGING_ONLY
+
+  machineType: E2_HIGHCPU_8
+
+serviceAccount: projects/${PROJECT_ID}/serviceAccounts/${_BUILDER_SA}
+
+substitutions:
+  _REPO: ""
+  _APP: attested-app
+  _TAG: latest
+  _SEVERITIES: CRITICAL
+  _SCAN_LOCATION: us
+  _ATTESTOR: vulnerability-scan-passed
+  _ATTESTOR_PROJECT: ""
+  _KMS_KEY_VERSION: ""
+  _RUNTIME_PROJECT: ""
+  _RUNTIME_SA: ""
+  _REGION: us-central1
+  _BUILDER_SA: ""
+
+timeout: 1200s

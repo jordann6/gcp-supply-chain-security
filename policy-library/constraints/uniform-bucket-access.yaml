@@ -1,0 +1,18 @@
+# Uniform bucket-level access on every bucket.
+#
+# The state bucket is the one place in this repo that holds the project IDs, the
+# key resource names, and the full IAM graph. Legacy ACLs reason about objects
+# one at a time, which means a bucket can be locked down and a single object in
+# it still readable, and nothing about the bucket's configuration says so.
+apiVersion: constraints.gatekeeper.sh/v1alpha1
+kind: GCPStorageBucketPolicyOnlyConstraintV1
+metadata:
+  name: uniform-bucket-access
+  annotations:
+    description: Cloud Storage buckets must use uniform bucket-level access.
+spec:
+  severity: high
+  match:
+    ancestries:
+      - "**"
+  parameters: {}

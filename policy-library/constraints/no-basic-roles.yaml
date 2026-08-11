@@ -1,0 +1,26 @@
+# No basic roles, at any level.
+#
+# roles/owner and roles/editor both carry the permissions needed to edit the
+# Binary Authorization policy and to use the signing key. A single grant of
+# either one, anywhere in either project, collapses the two-project split this
+# build depends on back into one trust boundary.
+#
+# The allowlist is empty on purpose. There is no legitimate member for these
+# roles in this repo, so the correct number of exceptions is zero rather than a
+# short list that grows.
+apiVersion: constraints.gatekeeper.sh/v1alpha1
+kind: GCPIAMAllowedBindingsConstraintV1
+metadata:
+  name: no-basic-roles
+  annotations:
+    description: roles/owner and roles/editor may not be granted.
+spec:
+  severity: high
+  match:
+    ancestries:
+      - "**"
+  parameters:
+    mode: allowlist
+    assetType: cloudresourcemanager.googleapis.com/Project
+    role: "roles/owner"
+    members: []
