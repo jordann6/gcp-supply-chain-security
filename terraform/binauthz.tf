@@ -3,13 +3,23 @@
 # This is the only resource in the repo that says no. Everything else exists so
 # that this one has something trustworthy to check.
 
+# Written as a plain conditional between two whole lists rather than as a
+# concat with a conditionally empty tail.
+#
+# That is not a style preference. The concat form produced a tuple the provider
+# serialised wrong: applies sent one element instead of two, alternating which
+# one survived, and the false branch sent an empty list that the API rejected
+# outright with "evaluation mode requires at least one require_attestations_by".
+# The API accepts both attestors when the same policy is imported with gcloud,
+# so the defect is on the write path in the provider, not in Binary
+# Authorization. Both branches here are ordinary known lists.
 locals {
-  required_attestors = concat(
-    [google_binary_authorization_attestor.scan_gate.id],
-    var.require_cloud_build_attestation
-    ? ["projects/${google_project.build.project_id}/attestors/built-by-cloud-build"]
-    : [],
-  )
+  required_attestors = var.require_cloud_build_attestation ? [
+    google_binary_authorization_attestor.scan_gate.id,
+    "projects/${google_project.build.project_id}/attestors/built-by-cloud-build",
+    ] : [
+    google_binary_authorization_attestor.scan_gate.id,
+  ]
 }
 
 resource "google_binary_authorization_policy" "runtime" {

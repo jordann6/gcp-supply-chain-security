@@ -23,7 +23,22 @@ check() {
 
 echo "==> Verifying"
 
-check "sshd config parses"            sshd -t
+# sshd -t refuses to run without a host key, and harden.sh has already deleted
+# them by this point so that every instance from this family generates its own.
+# The two steps conflict, and the first bake failed here rather than shipping an
+# unparsed config, which is the gate working. Generating a throwaway key lets the
+# syntax check run without reintroducing a baked-in one.
+sshd_parses() {
+  local tmp
+  tmp="$(mktemp -d)"
+  ssh-keygen -q -t ed25519 -N '' -f "${tmp}/host_key" >/dev/null 2>&1
+  local rc=0
+  sshd -t -h "${tmp}/host_key" || rc=$?
+  rm -rf "${tmp}"
+  return "${rc}"
+}
+
+check "sshd config parses"            sshd_parses
 check "root login disabled"           grep -qx "PermitRootLogin no" /etc/ssh/sshd_config.d/60-hardening.conf
 check "password auth disabled"        grep -qx "PasswordAuthentication no" /etc/ssh/sshd_config.d/60-hardening.conf
 check "ip forwarding off"             grep -qx "net.ipv4.ip_forward = 0" /etc/sysctl.d/60-hardening.conf

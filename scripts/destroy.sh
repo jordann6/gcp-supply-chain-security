@@ -78,9 +78,16 @@ rule "5. Scheduling KMS key version destruction"
 # Scheduling rather than deleting, because deleting is not on offer. The 24 hour
 # minimum is the recovery window, and it is the reason this build costs a few
 # cents after teardown rather than nothing.
-KEY_RING="$(echo "${KMS_KEY_VERSION}" | cut -d/ -f6)"
-KEY_NAME="$(echo "${KMS_KEY_VERSION}" | cut -d/ -f8)"
-KEY_LOCATION="$(echo "${KMS_KEY_VERSION}" | cut -d/ -f4)"
+# Parsed by label, not by position. The Terraform output carries a
+# //cloudkms.googleapis.com/v1/ prefix that the gcloud form does not, so
+# counting slashes takes the wrong field from one of the two.
+field() {
+  echo "$1" | tr '/' '\n' | awk -v k="$2" 'found { print; exit } $0 == k { found = 1 }'
+}
+
+KEY_LOCATION="$(field "${KMS_KEY_VERSION}" locations)"
+KEY_RING="$(field "${KMS_KEY_VERSION}" keyRings)"
+KEY_NAME="$(field "${KMS_KEY_VERSION}" cryptoKeys)"
 gcloud kms keys versions list \
   --project="${BUILD_PROJECT}" \
   --location="${KEY_LOCATION}" \

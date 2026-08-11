@@ -139,11 +139,17 @@ variable "require_cloud_build_attestation" {
     scan passed. The two answer different questions, so requiring both is the
     honest end state.
 
-    It defaults to false because built-by-cloud-build is created by Google on
-    the first build that requests verified provenance, and Binary Authorization
-    rejects a policy naming an attestor that does not exist yet. Run one build,
-    then set this true and re-apply. That two-phase rollout is also how you would
-    add an attestor to a policy already in front of live traffic.
+    It defaults to false, and the reason is an ordering property rather than a
+    configuration problem. Cloud Build writes the provenance attestation when
+    the build *completes*, so a build whose last step deploys its own image can
+    never satisfy it: at the moment the deploy runs, the attestation the policy
+    requires has not been created yet. Verified live, and the denial names
+    built-by-cloud-build specifically.
+
+    Turning this on therefore means splitting build and deploy into separate
+    pipelines, which is the better design and a larger change than this repo
+    demonstrates. It is left wired up and off rather than deleted, because the
+    seam is where the next version of this build starts.
   EOT
   type        = bool
   default     = false

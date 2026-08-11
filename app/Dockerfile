@@ -7,7 +7,7 @@
 # rather than about Debian's release cadence, and a gate whose output is mostly
 # irrelevant is a gate that gets turned off.
 
-FROM golang:1.23-bookworm AS build
+FROM golang:1.25-bookworm AS build
 
 WORKDIR /src
 

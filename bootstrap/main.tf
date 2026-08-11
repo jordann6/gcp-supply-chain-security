@@ -13,12 +13,28 @@ resource "random_id" "suffix" {
 locals {
   seed_project_id = "${var.name_prefix}-seed-${random_id.suffix.hex}"
 
-  # Only what the root module's provider needs in order to talk to the API as a
-  # user. Everything the pipeline itself uses is enabled on the build and
-  # runtime projects, not here.
+  # Every API the root module *calls*, not every API the built system uses.
+  #
+  # This distinction cost an apply. The root module sets user_project_override
+  # with billing_project pointed here, which makes the seed the quota project
+  # for every API call Terraform makes. Google requires an API to be enabled on
+  # the quota project as well as on the project the resource lands in, so
+  # creating a key ring in the build project fails with SERVICE_DISABLED naming
+  # the seed. The error names a project you are not creating anything in, which
+  # is what makes it confusing rather than obvious.
+  #
+  # Services that only ever run inside the build and runtime projects, with no
+  # Terraform resource of their own, are deliberately absent: Cloud Build,
+  # Cloud Run, and on-demand scanning are called by the pipeline using its own
+  # credentials, not by Terraform.
   seed_apis = [
+    "artifactregistry.googleapis.com",
+    "binaryauthorization.googleapis.com",
     "cloudbilling.googleapis.com",
+    "cloudkms.googleapis.com",
     "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "containeranalysis.googleapis.com",
     "iam.googleapis.com",
     "orgpolicy.googleapis.com",
     "serviceusage.googleapis.com",

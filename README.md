@@ -72,7 +72,7 @@ The job is inert until `GCP_WIF_PROVIDER` is set as a repository variable, so a 
 
 The gate is the step ordering, not a conditional. Cloud Build stops on the first failing step, so `attest` is unreachable when `scan` exits non-zero, and there is nothing in the signing step to bypass.
 
-The default blocking severity is CRITICAL only. HIGH is the right setting once the base image is pinned and patched, and the wrong one before that, because the gate then fails on findings in distro packages the build does not control and gets switched off within a week. The container is a static Go binary on `distroless/static`, which keeps the scan result about the code rather than about Debian's release cadence.
+The default blocking severity is CRITICAL only. HIGH is the right setting once the base image is pinned and patched, and the wrong one before that, because the gate then fails on findings in distro packages the build does not control and gets switched off within a week. The container is a static Go binary on `distroless/static`, which keeps the scan result about the code rather than about Debian's release cadence. That held up: when the gate did fire, it fired on the Go toolchain, not on a distro package.
 
 Cloud Build runs as a dedicated service account, not the legacy default. That default carries `roles/editor` on its own project, which would let a compromised build step rewrite the policy meant to constrain it.
 
@@ -111,7 +111,7 @@ packer init .
 packer build -var project_id="${BUILD_PROJECT}" -var zone="${ZONE}" hardened-image.pkr.hcl
 ```
 
-The first apply runs with `require_cloud_build_attestation = false`. Google creates the `built-by-cloud-build` attestor on the first build that requests verified provenance, and Binary Authorization rejects a policy naming an attestor that does not exist yet. After one build, set it true and re-apply. That two-phase rollout is also how you would add an attestor to a policy already in front of live traffic.
+The root module needs two apply passes on a first run. The provider expands the plan for `google_binary_authorization_policy` before the attestor it references exists, and fails with "Provider produced inconsistent final plan". The second apply succeeds because the attestor ID is known by then, and everything created on the first pass is kept.
 
 ## Validation
 
@@ -131,6 +131,24 @@ Four acts, each runnable on its own:
 Two of the four expect a non-zero exit, so the script checks that the failure was the predicted one. A deploy that fails for an unrelated reason is reported as a failed demo rather than as a passing control, which matters more than it sounds: a broken image, a missing permission, and an enforced policy all produce a failed deploy, and only one of them is the thing being demonstrated.
 
 The service is deployed `--no-allow-unauthenticated`, so act 2 calls it with an identity token. That is deliberate rather than an oversight, and it lines up with the `iam.allowedPolicyMemberDomains` constraint in `gcp-landing-zone`.
+
+## What the live run found
+
+Everything below was found by deploying this for real on 2026-08-10, not by reading documentation. They are recorded because each one cost time and none of them is in the obvious place.
+
+**The Terraform provider drops `require_attestations_by` on update.** Changing the attestor list on an existing `google_binary_authorization_policy` sends the wrong value: going from two attestors to one sent an empty list, which the API rejected with "evaluation mode requires at least one require_attestations_by", and going from one to two sent one, alternating which survived. Importing the identical policy with `gcloud container binauthz policy import` works, so the defect is on the provider's write path rather than in Binary Authorization. The remedy is `terraform apply -replace=google_binary_authorization_policy.runtime`, because the create path is fine and only the update path is broken.
+
+**A build cannot satisfy `built-by-cloud-build` for its own deployment.** The provenance attestation is written when the build completes, so at the moment the deploy step runs it does not exist yet. Requiring that attestor means splitting build and deploy into separate pipelines. See `require_cloud_build_attestation`.
+
+**Attaching an attestation and reading one back are different permissions.** The build signs, then polls until the attestation is readable before deploying. With only `containeranalysis.notes.attacher`, that poll returns an empty list forever: the call succeeds and returns nothing, so it looks like a propagation delay that never resolves. The fix is `containeranalysis.notes.occurrences.viewer` on the note, after which the attestation is visible in about one second.
+
+**The seed project needs every API Terraform calls, not just the ones it owns.** `user_project_override` with `billing_project` pointed at the seed makes the seed the quota project for every call, and Google requires an API to be enabled on the quota project as well as on the project the resource lands in. Creating a key ring in the build project fails with `SERVICE_DISABLED` naming the seed, which is a project you are not creating anything in.
+
+**A stale ADC quota project reads as a missing bucket.** `terraform init` failed with "bucket doesn't exist" for a bucket that plainly existed. The cause was `gcloud auth application-default` still pointing its quota project at a seed project deleted by an earlier build, so the storage call billed to a dead project. Fixed with `gcloud auth application-default set-quota-project`.
+
+**The image verification gate caught a conflict between two of its own steps.** The first bake failed on "sshd config parses", because `sshd -t` needs a host key and the cleanup step had already deleted the host keys so that every instance generates its own. That is the gate working: it refused to publish an image whose config had not been parsed. `verify.sh` now generates a throwaway key for the check.
+
+**The scan gate blocked our own container.** The first pipeline run was refused with two CRITICALs, both in the Go toolchain rather than in the application or the base image, fixed in 1.24.13 and 1.25.9. The build was on 1.23.12. Bumping the builder to 1.25 was the correct response, and lowering the threshold would have been the tempting one. This is the argument for CRITICAL-only as a starting point: the gate fired once, on something real, and was actionable in one line.
 
 ## Teardown
 

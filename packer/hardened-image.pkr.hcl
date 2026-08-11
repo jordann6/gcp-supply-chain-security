@@ -52,11 +52,31 @@ locals {
   timestamp = formatdate("YYYYMMDD-hhmmss", timestamp())
 }
 
+variable "network" {
+  type        = string
+  default     = "bake"
+  description = "VPC in the build project. There is no default network, by design."
+}
+
+variable "subnetwork" {
+  type        = string
+  default     = "bake-us-central1"
+  description = "Subnet in the bake VPC."
+}
+
 source "googlecompute" "hardened" {
   project_id          = var.project_id
   zone                = var.zone
   source_image_family = var.source_image_family
   ssh_username        = "packer"
+
+  network    = var.network
+  subnetwork = var.subnetwork
+
+  # The one firewall rule that permits SSH targets this tag. Without it the bake
+  # instance boots and Packer times out waiting for a connection that the
+  # implied deny is dropping.
+  tags = ["packer-bake"]
 
   image_name        = "${var.image_family}-${local.timestamp}"
   image_family      = var.image_family

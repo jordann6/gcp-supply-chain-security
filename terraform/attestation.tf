@@ -51,6 +51,18 @@ resource "google_container_analysis_note_iam_member" "builder_attacher" {
   member  = "serviceAccount:${google_service_account.builder.email}"
 }
 
+# Attaching an occurrence and reading one back are separate permissions, and the
+# builder needs both. It signs, then polls until the attestation is readable
+# before handing off to the deploy step. Without this grant the poll sees an
+# empty list forever: the attestation exists, the call succeeds, and it returns
+# nothing, so the failure looks like a propagation delay that never resolves.
+resource "google_container_analysis_note_iam_member" "builder_reader" {
+  project = google_container_analysis_note.scan_passed.project
+  note    = google_container_analysis_note.scan_passed.name
+  role    = "roles/containeranalysis.notes.occurrences.viewer"
+  member  = "serviceAccount:${google_service_account.builder.email}"
+}
+
 # Lets the build service account create attestations against this attestor.
 # Deliberately not attestorsAdmin: the builder may add evidence, never redefine
 # what the attestor accepts as evidence.
