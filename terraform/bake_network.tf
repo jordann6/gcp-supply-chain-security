@@ -28,28 +28,26 @@ resource "google_compute_subnetwork" "bake" {
   }
 }
 
-# SSH to the bake instance, and only to the bake instance.
+# SSH to the bake instance, and only to the bake instance, and only through
+# Identity-Aware Proxy.
 #
-# The target tag matters more than the source range here. A bake instance exists
-# for about five minutes and carries this tag; nothing else in the project ever
-# does, so the rule has no target when a bake is not running. Narrowing the
-# source instead would mean either pinning the operator's public address, which
-# breaks for the next person and for CI, or standing up Cloud NAT and IAP, which
-# bills by the hour whether or not anything is being baked.
+# Packer tunnels its SSH session through IAP (use_iap in the Packer source), so
+# the only source that ever needs port 22 is Google's IAP forwarding range. The
+# connection is authorized by IAM (iap.tunnelResourceAccessor, held by the
+# project owner who runs the bake), not by where it comes from, so nothing
+# about the rule breaks for the next operator. IAP TCP forwarding has no hourly
+# charge; it is standing up Cloud NAT that would.
 #
-# The honest summary: this is a five minute exposure of a machine with no data
-# on it, no service account attached, and password authentication off, traded
-# against permanent infrastructure. In a build that bakes continuously rather
-# than on demand, the NAT is the right answer instead.
+# The target tag still matters: a bake instance exists for about five minutes
+# and carries this tag, and nothing else in the project ever does, so the rule
+# has no target when a bake is not running.
 resource "google_compute_firewall" "bake_ssh" {
-  # checkov:skip=CKV_GCP_2: see above. Scoped by target tag to instances that
-  # only exist during a bake, rather than left open to the whole network.
   project       = google_project.build.project_id
   name          = "bake-ssh"
   network       = google_compute_network.bake.name
   direction     = "INGRESS"
   priority      = 1000
-  source_ranges = ["0.0.0.0/0"]
+  source_ranges = ["35.235.240.0/20"] # IAP TCP forwarding
   target_tags   = ["packer-bake"]
 
   allow {
