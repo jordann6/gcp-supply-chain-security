@@ -6,6 +6,13 @@ The demo is two refusals. An image that is real, in the right registry, built by
 
 ![Architecture](docs/architecture.png)
 
+Green is the only way in. A container built by Cloud Build is scanned, and only
+a clean digest is signed with a key the build project can use and the runtime
+project can only verify. Binary Authorization admits nothing to Cloud Run
+without that attestation. VMs follow the same rule through
+`trustedImageProjects`: the Packer-baked image family boots, a stock public
+image is refused.
+
 **Cost:** under $1 for a full build, demo, and destroy cycle. The standing cost if left up is about $0.10 per month, almost all of it one KMS key version. **Teardown:** four things `terraform destroy` does not clean, all documented below, all handled by `scripts/destroy.sh`.
 
 ## The problem
