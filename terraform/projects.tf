@@ -26,6 +26,8 @@ locals {
     "compute.googleapis.com",
     "containeranalysis.googleapis.com",
     "iam.googleapis.com",
+    # Packer's SSH to the bake instance tunnels through IAP.
+    "iap.googleapis.com",
     "logging.googleapis.com",
     "ondemandscanning.googleapis.com",
     "serviceusage.googleapis.com",

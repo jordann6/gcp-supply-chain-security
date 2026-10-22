@@ -27,13 +27,13 @@ variable "project_id" {
 }
 
 variable "zone" {
-  type        = string
-  default     = "us-central1-a"
+  type    = string
+  default = "us-central1-a"
 }
 
 variable "image_family" {
-  type        = string
-  default     = "hardened-ubuntu-2204"
+  type    = string
+  default = "hardened-ubuntu-2204"
 }
 
 variable "source_image_family" {
@@ -73,10 +73,14 @@ source "googlecompute" "hardened" {
   network    = var.network
   subnetwork = var.subnetwork
 
-  # The one firewall rule that permits SSH targets this tag. Without it the bake
-  # instance boots and Packer times out waiting for a connection that the
-  # implied deny is dropping.
+  # The one firewall rule that permits SSH targets this tag, and admits only
+  # Google's IAP range. Without the tag the bake instance boots and Packer times
+  # out waiting for a connection that the implied deny is dropping.
   tags = ["packer-bake"]
+
+  # SSH goes through an IAP tunnel (gcloud must be on the PATH), so port 22 is
+  # never open to the internet. The public address below is for apt egress only.
+  use_iap = true
 
   image_name        = "${var.image_family}-${local.timestamp}"
   image_family      = var.image_family
@@ -92,8 +96,8 @@ source "googlecompute" "hardened" {
   disk_size    = 20
   disk_type    = "pd-balanced"
 
-  # The bake instance gets a public address and no service account. Packer needs
-  # outbound access to apt, and the alternative (Private Google Access plus a
+  # The bake instance gets a public address and no service account. The address
+  # carries outbound apt traffic only (SSH arrives over IAP), and the alternative (Private Google Access plus a
   # Cloud NAT) is real infrastructure that has to exist before the first bake and
   # bills by the hour whether or not anything is being baked. A five minute
   # instance with no identity attached is the cheaper trade here.
